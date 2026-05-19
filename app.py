@@ -248,7 +248,11 @@ def start_one_round(progress_bar, status_text):
     except Exception as e:
         st.error(f"存数据库异常: {e}")
 
-    make_excel_and_html(final_results, cur_time, file_time)
+    try:
+        make_excel_and_html(final_results, cur_time, file_time)
+    except Exception as e:
+        st.error(f"⚠️ 写入 Excel 备份失败 (不影响网页展示): {e}")
+
     status_text.text("✅ 本轮分析完成！")
     return final_results, cur_time
 
