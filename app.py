@@ -165,77 +165,6 @@ def classify_by_ai_batch(items):
 
     return {}
 
-# ================= 图表渲染 (适配 Streamlit) =================
-def render_bar_chart(df, current_time_str):
-    if df.empty or 'ai_category' not in df.columns: return None
-    category_counts = df['ai_category'].value_counts()
-
-    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei']
-    plt.rcParams['axes.unicode_minus'] = False
-    fig = plt.figure(figsize=(10, 6))
-
-    bars = plt.bar(category_counts.index, category_counts.values, color='#4a68c4', edgecolor='none', alpha=0.8)
-    for bar in bars:
-        yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2, yval + 0.5, int(yval), ha='center', va='bottom', color='#555555')
-
-    plt.title(f"微博热搜当次智能分类统计 ({current_time_str})", fontsize=16, color='#333333', pad=15)
-    plt.xlabel("AI 智能分类", fontsize=12, labelpad=10)
-    plt.ylabel("热搜数量", fontsize=12, labelpad=10)
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
-    plt.gca().spines['top'].set_visible(False)
-    plt.gca().spines['right'].set_visible(False)
-    plt.tight_layout()
-    return fig
-
-
-def render_historical_bar_chart(current_time_str):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        df = pd.read_sql_query("SELECT ai_category FROM hot_search", conn)
-        conn.close()
-
-        df = df[~df['ai_category'].isin(['处理中...', '分类超时', '暂无'])]
-        if df.empty: return None
-
-        category_counts = df['ai_category'].value_counts()
-
-        fig = plt.figure(figsize=(10, 6))
-        bars = plt.bar(category_counts.index, category_counts.values, color='#e67e22', edgecolor='none', alpha=0.8)
-        for bar in bars:
-            yval = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width() / 2, yval + 0.5, int(yval), ha='center', va='bottom',
-                     color='#555555')
-
-        plt.title(f"微博热搜历史全局分类总计 (截至 {current_time_str})", fontsize=16, color='#333333', pad=15)
-        plt.tight_layout()
-        return fig
-    except:
-        return None
-
-
-def render_line_chart(current_time_str):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        df = pd.read_sql_query("SELECT timestamp, ai_category FROM hot_search", conn)
-        conn.close()
-
-        df = df[~df['ai_category'].isin(['处理中...', '分类超时', '暂无'])]
-        if df.empty: return None
-
-        trend_df = df.groupby(['timestamp', 'ai_category']).size().unstack(fill_value=0)
-
-        fig = plt.figure(figsize=(12, 6))
-        for category in trend_df.columns:
-            plt.plot(trend_df.index, trend_df[category], marker='o', linewidth=2, label=category)
-
-        plt.title(f"微博热搜各分类热度趋势变化 ({current_time_str})", fontsize=16, color='#333333', pad=15)
-        plt.xticks(rotation=45, ha='right')
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        return fig
-    except:
-        return None
 
 
 def make_excel_and_html(results, current_time_str, filename_time_str):
@@ -346,13 +275,36 @@ if run_btn:
         tab1, tab2, tab3 = st.tabs(["当次分类分布", "历史总计分布", "热度趋势折线"])
 
         with tab1:
-            fig1 = render_bar_chart(df, cur_time)
-            if fig1: st.pyplot(fig1)
+            st.markdown(f"**微博热搜当次智能分类统计 ({cur_time})**")
+            # 过滤掉不需要统计的干扰项
+            valid_df = df[~df['ai_category'].isin(['处理中...', '分类超时', '暂无'])]
+            if not valid_df.empty:
+                category_counts = valid_df['ai_category'].value_counts()
+                st.bar_chart(category_counts, color="#4a68c4")
 
         with tab2:
-            fig2 = render_historical_bar_chart(cur_time)
-            if fig2: st.pyplot(fig2)
+            st.markdown(f"**微博热搜历史全局分类总计 (截至 {cur_time})**")
+            try:
+                conn = sqlite3.connect(DB_FILE)
+                history_df = pd.read_sql_query("SELECT ai_category FROM hot_search", conn)
+                conn.close()
+                history_df = history_df[~history_df['ai_category'].isin(['处理中...', '分类超时', '暂无'])]
+                if not history_df.empty:
+                    history_counts = history_df['ai_category'].value_counts()
+                    st.bar_chart(history_counts, color="#e67e22")
+            except:
+                st.info("暂无历史数据")
 
         with tab3:
-            fig3 = render_line_chart(cur_time)
-            if fig3: st.pyplot(fig3)
+            st.markdown(f"**微博热搜各分类热度趋势变化 ({cur_time})**")
+            try:
+                conn = sqlite3.connect(DB_FILE)
+                trend_data = pd.read_sql_query("SELECT timestamp, ai_category FROM hot_search", conn)
+                conn.close()
+                trend_data = trend_data[~trend_data['ai_category'].isin(['处理中...', '分类超时', '暂无'])]
+                if not trend_data.empty:
+                    # 将数据透视为时间序列折线图所需的格式
+                    trend_pivot = trend_data.groupby(['timestamp', 'ai_category']).size().unstack(fill_value=0)
+                    st.line_chart(trend_pivot)
+            except:
+                st.info("历史数据不足，无法生成趋势图")
