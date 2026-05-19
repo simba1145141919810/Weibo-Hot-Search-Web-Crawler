@@ -24,16 +24,10 @@ WEIBO_COOKIE = st.secrets["WEIBO_COOKIE"]
 PROXY_URL = st.secrets.get("PROXY_URL", "")  # 云端不需要代理，默认设为空
 
 # 配置自定义代理客户端 (如果有代理则使用，没有则直连)
-if PROXY_URL:
-    custom_http_client = httpx.Client(proxy=PROXY_URL)
-else:
-    custom_http_client = httpx.Client()
-
-# 初始化 AI 客户端
+# 初始化 AI 客户端 (云端海外服务器直接直连，去除所有代理逻辑)
 ai_client = OpenAI(
     api_key=API_KEY,
-    base_url="https://api.x.ai/v1",
-    http_client=custom_http_client
+    base_url="https://api.x.ai/v1"
 )
 
 HOT_SEARCH_URL = "https://weibo.com/ajax/statuses/hot_band"
