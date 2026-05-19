@@ -129,6 +129,7 @@ def get_post_detail_api(word):
 
 
 # ================= 全新批量 AI 分类逻辑 =================
+# ================= 全新批量 AI 分类逻辑 =================
 def classify_by_ai_batch(items):
     prompt_text = (
         "你是一个严谨的数据分析师。请为以下50条微博热搜进行分类。\n"
@@ -143,8 +144,9 @@ def classify_by_ai_batch(items):
 
     for _ in range(3):
         try:
+            # 1. 发起大模型请求
             response = ai_client.chat.completions.create(
-                model="grok-4.20-reasoning",  # 你可以根据你实际使用的模型名称修改
+                model="grok-4.20-reasoning",  # ⚠️ 确保使用官方有效的模型名称
                 messages=[{"role": "user", "content": prompt_text}],
                 temperature=0.1,
                 timeout=45.0
@@ -152,15 +154,23 @@ def classify_by_ai_batch(items):
 
             content = response.choices[0].message.content.strip()
 
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
+            # 2. 尝试解析 JSON
+            try:
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+                return json.loads(content)
 
-            return json.loads(content)
+            except json.JSONDecodeError as je:
+                # 报警：如果 AI 瞎回答，没有按格式给 JSON，直接在网页显示它到底说了啥！
+                st.error(f"❌ AI 返回的数据格式不对，无法解析为 JSON: {je}")
+                st.code(content)
+                return {}
 
         except Exception as e:
-            print(f"批量分类重试中，错误信息: {e}")
+            # 报警：如果是网络不通、模型名字错、或者没钱了，直接把错误爆红显示在网页上！
+            st.error(f"❌ AI 接口调用彻底失败: {e}")
             time.sleep(2)
 
     return {}
