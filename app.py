@@ -259,7 +259,7 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 
-user_api_key = st.sidebar.text_input("唤醒密钥 (xAI API Key)", type="password", help="体验完整语义分类功能，请填入您的专属密钥。")
+user_api_key = st.sidebar.text_input("唤醒密钥 (API Key)", type="password", help="体验完整语义分类功能，请填入您的专属密钥。")
 st.sidebar.markdown("<p style='font-size: 0.8em; color: #666;'>*平台不会存储您的任何密钥数据。若留空，将尝试消耗系统隐藏的默认配额。</p>", unsafe_allow_html=True)
 
 # 核心安全逻辑：优先使用访客在侧边栏输入的 Key。如果访客没填，再静默兜底使用你放在 Secrets 里的个人 Key
