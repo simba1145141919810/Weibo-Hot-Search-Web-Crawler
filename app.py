@@ -13,14 +13,11 @@ from openai import OpenAI
 import streamlit as st
 from bs4 import BeautifulSoup
 
-# ================= 基础配置 =================
 SNAPSHOT_DIR = "history_snapshots"
 if not os.path.exists(SNAPSHOT_DIR):
     os.makedirs(SNAPSHOT_DIR)
 
-# 直接读取 Streamlit 的原生机密字典
 WEIBO_COOKIE = st.secrets["WEIBO_COOKIE"]
-# (API Key 和 ai_client 的初始化将移交到下方的 UI 界面中动态处理)
 
 HOT_SEARCH_URL = "https://weibo.com/ajax/statuses/hot_band"
 HEADERS = {
@@ -31,7 +28,6 @@ HEADERS = {
 DB_FILE = "weibo_hot_data.db"
 
 
-# ================= 数据库与 AI 逻辑 =================
 def init_database():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -51,10 +47,8 @@ import json
 def get_post_detail_api(word):
     if not word: return {"博主": "空", "头像": "", "博文摘要": "暂无"}
 
-    # 改为请求 PC 端微博搜索网页
     url = f"https://s.weibo.com/weibo?q={quote(word)}"
 
-    # 使用 PC 端的 User-Agent 和全局的 WEIBO_COOKIE
     pc_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -66,22 +60,17 @@ def get_post_detail_api(word):
         resp = httpx.get(url, headers=pc_headers, timeout=15)
         resp.raise_for_status()
 
-        # 使用 BeautifulSoup 解析 HTML
         soup = BeautifulSoup(resp.text, 'lxml')
 
-        # PC 端微博搜索结果的博文通常存放在 class="card-wrap" 且带有 mid 属性的 div 中
         cards = soup.find_all('div', class_='card-wrap')
 
         for card in cards:
-            # 过滤掉没有 mid 的卡片（这类通常是话题导语、推荐用户等非博文卡片）
             if 'mid' not in card.attrs:
                 continue
 
-            # 1. 提取博主昵称
             name_tag = card.find('a', class_='name')
             name = name_tag.text.strip() if name_tag else "未知博主"
 
-            # 2. 提取头像链接
             avatar = ""
             avatar_div = card.find('div', class_='avator')
             if avatar_div:
@@ -91,15 +80,11 @@ def get_post_detail_api(word):
                     if avatar.startswith('//'):
                         avatar = "https:" + avatar
 
-            # 3. 提取博文摘要正文
-            # 正文通常在 node-type="feed_list_content" 的 p 标签中
             txt_tag = card.find('p', class_='txt', attrs={'node-type': 'feed_list_content'})
             if not txt_tag:
-                # 兼容部分未带 node-type 的情况
                 txt_tag = card.find('p', class_='txt')
 
             if txt_tag:
-                # get_text() 可以自动抹平内部的 a 标签和 span 标签，拿到纯文本
                 txt = txt_tag.get_text(separator=' ', strip=True)
                 txt = txt.replace('收起全文 d', '').strip()[:100]  # 去掉展开全文带来的尾巴
             else:
@@ -108,13 +93,11 @@ def get_post_detail_api(word):
             return {"博主": name, "头像": avatar, "博文摘要": txt}
 
     except Exception as e:
-        # 如果出错，将其打印到终端以便排查，而不是直接吞掉异常
         print(f"抓取热搜 [{word}] 详情失败: 错误信息 -> {e}")
 
     return {"博主": "页面无动态", "头像": "", "博文摘要": "微博未加载内容"}
 
 
-# ================= 全新批量 AI 分类逻辑 =================
 def classify_by_ai_batch(items, client, model_name):
     prompt_text = (
         "你是一个严谨的数据分析师。请为以下50条微博热搜进行分类。\n"
@@ -129,7 +112,6 @@ def classify_by_ai_batch(items, client, model_name):
 
     for _ in range(3):
         try:
-            # 动态使用传入的 client 和 model_name
             response = client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt_text}],
@@ -188,7 +170,6 @@ def start_one_round(progress_bar, status_text, client, model_name):
     final_results = []
     status_text.text("🕷️ 正在通过底层 API 高速抓取详情...")
 
-    # 1. 单纯的抓取循环：只负责爬取 50 条数据
     for idx, item in enumerate(valid_items, 1):
         word = item.get("word", "")
         detail = get_post_detail_api(word)
@@ -201,19 +182,15 @@ def start_one_round(progress_bar, status_text, client, model_name):
         progress_bar.progress(idx / 50, text=f"正在极速抓取: {word}")
         time.sleep(random.uniform(1.3, 3.8))
 
-    # ================= 注意：这里已经退出了上面的 for 循环 =================
 
-    # 2. 批量调用 AI：等 50 条全部爬完后，统一处理一次
     status_text.text("🧠 正在呼叫 AI 进行全局语义分类 (单次全量处理)...")
     progress_bar.progress(0.99, text="等待 AI 批量处理中，这可能需要十多秒，请稍候...")
 
     batch_items = [{"rank": r["rank"], "title": r["title"], "summary": r["summary"]} for r in final_results]
-    # 传入 client 和 model_name
     category_mapping = classify_by_ai_batch(batch_items, client, model_name)
     for r in final_results:
         r["ai_category"] = category_mapping.get(str(r["rank"]), "其他")
 
-    # 3. 存入数据库与生成文件
     status_text.text("🗄️ 正在同步数据库与生成备份...")
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -238,11 +215,9 @@ def start_one_round(progress_bar, status_text, client, model_name):
     return final_results, cur_time
 
 
-# ================= Streamlit 前端 UI =================
 st.set_page_config(page_title="微博热搜 AI 洞察", page_icon="📈", layout="wide")
 init_database()
 
-# --- 极简风格侧边栏：多模型动态配置 ---
 st.sidebar.markdown(
     """
     <div style='border-left: 4px solid #4169E1; padding-left: 12px; margin-bottom: 20px;'>
@@ -253,19 +228,16 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 
-# 1. 让用户自由输入任何公司的配置
 user_api_key = st.sidebar.text_input("1. API Key", type="password", help="填入您选择的大模型供应商的 API 密钥。")
 user_base_url = st.sidebar.text_input("2. API Base URL", value="https://api.x.ai/v1", help="例如：OpenAI 使用 https://api.openai.com/v1，DeepSeek 使用 https://api.deepseek.com")
 user_model_name = st.sidebar.text_input("3. 模型名称 (Model Name)", value="grok-beta", help="例如：gpt-4o, deepseek-chat, grok-2-latest")
 
 st.sidebar.markdown("<p style='font-size: 0.8em; color: #666;'>*核心提示：若留空Key，系统将默认尝试读取云端配置文件中的硬编码配额。</p>", unsafe_allow_html=True)
 
-# 2. 动态决定最终生效的配置 (输入优先，Secrets兜底)
 API_KEY = user_api_key if user_api_key else st.secrets.get("API_KEY", "")
 BASE_URL = user_base_url if user_base_url else "https://api.x.ai/v1"
 MODEL_NAME = user_model_name if user_model_name else "grok-beta"
 
-# 3. 动态初始化大模型客户端
 if API_KEY:
     ai_client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 else:
@@ -280,7 +252,6 @@ with col1:
     run_btn = st.button("🚀 立即拉取并分析", type="primary", use_container_width=True)
 
 if run_btn:
-    # 安全拦截：如果没有有效客户端，直接拦截
     if not ai_client:
         st.error("⚠️ 核心驱动缺失：请在左侧边栏配置有效的 API Key 以启动 AI 分类引擎。")
         st.stop()
@@ -288,7 +259,6 @@ if run_btn:
     progress_bar = st.progress(0, text="初始化中...")
     status_text = st.empty()
 
-    # 将动态生成的客户端和模型名称，一路向下传递
     results, cur_time = start_one_round(progress_bar, status_text, ai_client, MODEL_NAME)
 
     if results:
