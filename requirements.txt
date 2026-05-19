@@ -1,0 +1,8 @@
+streamlit
+openai
+httpx
+pandas
+matplotlib
+beautifulsoup4
+lxml
+openpyxl
