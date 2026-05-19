@@ -19,16 +19,8 @@ if not os.path.exists(SNAPSHOT_DIR):
     os.makedirs(SNAPSHOT_DIR)
 
 # 直接读取 Streamlit 的原生机密字典
-API_KEY = st.secrets["API_KEY"]
 WEIBO_COOKIE = st.secrets["WEIBO_COOKIE"]
-PROXY_URL = st.secrets.get("PROXY_URL", "")  # 云端不需要代理，默认设为空
-
-# 配置自定义代理客户端 (如果有代理则使用，没有则直连)
-# 初始化 AI 客户端 (云端海外服务器直接直连，去除所有代理逻辑)
-ai_client = OpenAI(
-    api_key=API_KEY,
-    base_url="https://api.x.ai/v1"
-)
+# (API Key 和 ai_client 的初始化将移交到下方的 UI 界面中动态处理)
 
 HOT_SEARCH_URL = "https://weibo.com/ajax/statuses/hot_band"
 HEADERS = {
@@ -252,18 +244,49 @@ def start_one_round(progress_bar, status_text):
 
 
 # ================= Streamlit 前端 UI =================
+# ================= Streamlit 前端 UI =================
 st.set_page_config(page_title="微博热搜 AI 洞察", page_icon="📈", layout="wide")
 init_database()
 
+# --- 全新添加：极简风格侧边栏与密钥接管 ---
+st.sidebar.markdown(
+    """
+    <div style='border-left: 4px solid #4169E1; padding-left: 12px; margin-bottom: 20px;'>
+        <h3 style='color: #4169E1; margin:0; font-weight: 500;'>Insight Engine</h3>
+        <p style='color: #87CEEB; font-size: 0.85em; margin-top: 4px; font-style: italic;'>Minimalist AI Agent</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+user_api_key = st.sidebar.text_input("唤醒密钥 (xAI API Key)", type="password", help="体验完整语义分类功能，请填入您的专属密钥。")
+st.sidebar.markdown("<p style='font-size: 0.8em; color: #666;'>*平台不会存储您的任何密钥数据。若留空，将尝试消耗系统隐藏的默认配额。</p>", unsafe_allow_html=True)
+
+# 核心安全逻辑：优先使用访客在侧边栏输入的 Key。如果访客没填，再静默兜底使用你放在 Secrets 里的个人 Key
+API_KEY = user_api_key if user_api_key else st.secrets.get("API_KEY", "")
+
+# 动态初始化大模型客户端
+if API_KEY:
+    ai_client = OpenAI(api_key=API_KEY, base_url="https://api.x.ai/v1")
+else:
+    ai_client = None
+
+# --- 主界面 UI ---
 st.title("📈 微博热搜 AI 实时洞察平台")
 st.markdown("基于大语言模型与自动化爬虫的社情民意监控看板。点击下方按钮即可触发实时分析。")
-
-if not API_KEY or not WEIBO_COOKIE:
-    st.warning("⚠️ 检测到密钥缺失，请确保已在 .streamlit/secrets.toml 中正确配置。")
 
 col1, col2 = st.columns([1, 4])
 with col1:
     run_btn = st.button("🚀 立即拉取并分析", type="primary", use_container_width=True)
+
+if run_btn:
+    # 拦截校验：如果连兜底的 Key 都没有，直接拦截并报错，保护程序不崩溃
+    if not ai_client:
+        st.error("⚠️ 核心驱动缺失：请在左侧边栏配置 API Key 以启动 AI 分类引擎。")
+        st.stop()
+
+    progress_bar = st.progress(0, text="初始化中...")
+    # ... (下方保留你原有的 results, cur_time = start_one_round... 等代码完全不变)
 
 if run_btn:
     progress_bar = st.progress(0, text="初始化中...")
