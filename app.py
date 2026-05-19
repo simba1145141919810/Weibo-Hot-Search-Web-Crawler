@@ -115,8 +115,7 @@ def get_post_detail_api(word):
 
 
 # ================= 全新批量 AI 分类逻辑 =================
-# ================= 全新批量 AI 分类逻辑 =================
-def classify_by_ai_batch(items):
+def classify_by_ai_batch(items, client, model_name):
     prompt_text = (
         "你是一个严谨的数据分析师。请为以下50条微博热搜进行分类。\n"
         "可选分类严格限制为以下9个：社会, 文娱, 体育, 财经, 科技, 军事, 国际, 游戏, 其他。\n"
@@ -130,9 +129,9 @@ def classify_by_ai_batch(items):
 
     for _ in range(3):
         try:
-            # 1. 发起大模型请求
-            response = ai_client.chat.completions.create(
-                model="grok-4.20-reasoning",  # ⚠️ 确保使用官方有效的模型名称
+            # 动态使用传入的 client 和 model_name
+            response = client.chat.completions.create(
+                model=model_name,
                 messages=[{"role": "user", "content": prompt_text}],
                 temperature=0.1,
                 timeout=45.0
@@ -140,7 +139,6 @@ def classify_by_ai_batch(items):
 
             content = response.choices[0].message.content.strip()
 
-            # 2. 尝试解析 JSON
             try:
                 if "```json" in content:
                     content = content.split("```json")[1].split("```")[0].strip()
@@ -149,18 +147,15 @@ def classify_by_ai_batch(items):
                 return json.loads(content)
 
             except json.JSONDecodeError as je:
-                # 报警：如果 AI 瞎回答，没有按格式给 JSON，直接在网页显示它到底说了啥！
                 st.error(f"❌ AI 返回的数据格式不对，无法解析为 JSON: {je}")
                 st.code(content)
                 return {}
 
         except Exception as e:
-            # 报警：如果是网络不通、模型名字错、或者没钱了，直接把错误爆红显示在网页上！
             st.error(f"❌ AI 接口调用彻底失败: {e}")
             time.sleep(2)
 
     return {}
-
 
 
 def make_excel_and_html(results, current_time_str, filename_time_str):
@@ -176,7 +171,7 @@ def make_excel_and_html(results, current_time_str, filename_time_str):
     return excel_path
 
 
-def start_one_round(progress_bar, status_text):
+def start_one_round(progress_bar, status_text, client, model_name):
     now = datetime.now()
     cur_time = now.strftime('%Y-%m-%d %H:%M:%S')
     file_time = now.strftime('%Y%m%d_%H%M%S')
@@ -213,8 +208,8 @@ def start_one_round(progress_bar, status_text):
     progress_bar.progress(0.99, text="等待 AI 批量处理中，这可能需要十多秒，请稍候...")
 
     batch_items = [{"rank": r["rank"], "title": r["title"], "summary": r["summary"]} for r in final_results]
-    category_mapping = classify_by_ai_batch(batch_items)
-
+    # 传入 client 和 model_name
+    category_mapping = classify_by_ai_batch(batch_items, client, model_name)
     for r in final_results:
         r["ai_category"] = category_mapping.get(str(r["rank"]), "其他")
 
@@ -244,30 +239,35 @@ def start_one_round(progress_bar, status_text):
 
 
 # ================= Streamlit 前端 UI =================
-# ================= Streamlit 前端 UI =================
 st.set_page_config(page_title="微博热搜 AI 洞察", page_icon="📈", layout="wide")
 init_database()
 
-# --- 全新添加：极简风格侧边栏与密钥接管 ---
+# --- 极简风格侧边栏：多模型动态配置 ---
 st.sidebar.markdown(
     """
     <div style='border-left: 4px solid #4169E1; padding-left: 12px; margin-bottom: 20px;'>
         <h3 style='color: #4169E1; margin:0; font-weight: 500;'>Insight Engine</h3>
-        <p style='color: #87CEEB; font-size: 0.85em; margin-top: 4px; font-style: italic;'>Minimalist AI Agent</p>
+        <p style='color: #87CEEB; font-size: 0.85em; margin-top: 4px; font-style: italic;'>Universal AI Agent</p>
     </div>
     """,
     unsafe_allow_html=True
 )
 
-user_api_key = st.sidebar.text_input("唤醒密钥 (API Key)", type="password", help="体验完整语义分类功能，请填入您的专属密钥。")
-st.sidebar.markdown("<p style='font-size: 0.8em; color: #666;'>*平台不会存储您的任何密钥数据。若留空，将尝试消耗系统隐藏的默认配额。</p>", unsafe_allow_html=True)
+# 1. 让用户自由输入任何公司的配置
+user_api_key = st.sidebar.text_input("1. API Key", type="password", help="填入您选择的大模型供应商的 API 密钥。")
+user_base_url = st.sidebar.text_input("2. API Base URL", value="https://api.x.ai/v1", help="例如：OpenAI 使用 https://api.openai.com/v1，DeepSeek 使用 https://api.deepseek.com")
+user_model_name = st.sidebar.text_input("3. 模型名称 (Model Name)", value="grok-beta", help="例如：gpt-4o, deepseek-chat, grok-2-latest")
 
-# 核心安全逻辑：优先使用访客在侧边栏输入的 Key。如果访客没填，再静默兜底使用你放在 Secrets 里的个人 Key
+st.sidebar.markdown("<p style='font-size: 0.8em; color: #666;'>*核心提示：若留空Key，系统将默认尝试读取云端配置文件中的硬编码配额。</p>", unsafe_allow_html=True)
+
+# 2. 动态决定最终生效的配置 (输入优先，Secrets兜底)
 API_KEY = user_api_key if user_api_key else st.secrets.get("API_KEY", "")
+BASE_URL = user_base_url if user_base_url else "https://api.x.ai/v1"
+MODEL_NAME = user_model_name if user_model_name else "grok-beta"
 
-# 动态初始化大模型客户端
+# 3. 动态初始化大模型客户端
 if API_KEY:
-    ai_client = OpenAI(api_key=API_KEY, base_url="https://api.x.ai/v1")
+    ai_client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 else:
     ai_client = None
 
@@ -280,19 +280,16 @@ with col1:
     run_btn = st.button("🚀 立即拉取并分析", type="primary", use_container_width=True)
 
 if run_btn:
-    # 拦截校验：如果连兜底的 Key 都没有，直接拦截并报错，保护程序不崩溃
+    # 安全拦截：如果没有有效客户端，直接拦截
     if not ai_client:
-        st.error("⚠️ 核心驱动缺失：请在左侧边栏配置 API Key 以启动 AI 分类引擎。")
+        st.error("⚠️ 核心驱动缺失：请在左侧边栏配置有效的 API Key 以启动 AI 分类引擎。")
         st.stop()
 
     progress_bar = st.progress(0, text="初始化中...")
-    # ... (下方保留你原有的 results, cur_time = start_one_round... 等代码完全不变)
-
-if run_btn:
-    progress_bar = st.progress(0, text="初始化中...")
     status_text = st.empty()
 
-    results, cur_time = start_one_round(progress_bar, status_text)
+    # 将动态生成的客户端和模型名称，一路向下传递
+    results, cur_time = start_one_round(progress_bar, status_text, ai_client, MODEL_NAME)
 
     if results:
         df = pd.DataFrame(results)
@@ -307,7 +304,6 @@ if run_btn:
 
         with tab1:
             st.markdown(f"**微博热搜当次智能分类统计 ({cur_time})**")
-            # 过滤掉不需要统计的干扰项
             valid_df = df[~df['ai_category'].isin(['处理中...', '分类超时', '暂无'])]
             if not valid_df.empty:
                 category_counts = valid_df['ai_category'].value_counts()
@@ -334,7 +330,6 @@ if run_btn:
                 conn.close()
                 trend_data = trend_data[~trend_data['ai_category'].isin(['处理中...', '分类超时', '暂无'])]
                 if not trend_data.empty:
-                    # 将数据透视为时间序列折线图所需的格式
                     trend_pivot = trend_data.groupby(['timestamp', 'ai_category']).size().unstack(fill_value=0)
                     st.line_chart(trend_pivot)
             except:
