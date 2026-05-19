@@ -144,7 +144,7 @@ def classify_by_ai_batch(items):
     for _ in range(3):
         try:
             response = ai_client.chat.completions.create(
-                model="grok-4.20-0309-reasoning",  # 你可以根据你实际使用的模型名称修改
+                model="grok-4.20-reasoning",  # 你可以根据你实际使用的模型名称修改
                 messages=[{"role": "user", "content": prompt_text}],
                 temperature=0.1,
                 timeout=45.0
